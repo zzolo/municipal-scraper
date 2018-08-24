@@ -101,6 +101,16 @@ request(
     // Cheerio
     const $ = cheerio.load(body.toString());
 
+    // Doesn't come back with an error header, so we need to check for it
+    let $error = $('.alert-danger');
+    if ($error.length && $error.text()) {
+      console.error($error.text());
+      console.error(
+        `Error searching for ${caseId}, use the --no-cache option to force a re-fetch.`
+      );
+      return;
+    }
+
     // Main tables
     $('table.table-condensed').each((i, el) => {
       let $table = $(el);
