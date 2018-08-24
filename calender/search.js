@@ -1,20 +1,44 @@
-#!/usr/bin/env node#!/usr/bin/env
+#!/usr/bin/env node
 
 // Dependencies
 const fs = require('fs-extra');
 const path = require('path');
-const argv = require('yargs').argv;
 const request = require('cached-request')(require('request'));
 const cheerio = require('cheerio');
 const csv = require('d3-dsv').dsvFormat(',');
 const moment = require('moment-timezone');
 require('dotenv').load();
 
+// Command line options
+const argv = require('yargs')
+  .usage('\nUsage: node calender/search.js')
+  .option('no-cache', {
+    description: 'Turn off the cache.'
+  })
+  .option('cache', {
+    description: 'Time to cache results in seconds',
+    default: 60 * 60
+  })
+  .option('output', {
+    description: 'The directory to output results to.',
+    default: path.join(__dirname, '..', 'output')
+  })
+  .option('county', {
+    description:
+      'County code to use, defaults to the SCRAPER_CALENDAR_COUNTY environment variable.',
+    default: process.env.SCRAPER_CALENDAR_COUNTY
+  })
+  .option('date', {
+    description:
+      'Date to search calendar in format YYYY-MM-DD.  Defaults to current date.',
+    default: moment().format('YYYY-MM-DD')
+  }).argv;
+
 // Request cache
 const cacheDir = path.join(__dirname, '..', '.cache');
 fs.mkdirpSync(cacheDir);
 request.setCacheDirectory(cacheDir);
-const TTL = argv.cache === false ? 0 : 60 * 60 * 1000;
+const TTL = argv.cache === false ? 0 : parseInt(argv.cache) * 1000;
 const TIMEOUT = 10 * 60 * 1000;
 
 // Check for config
@@ -39,6 +63,9 @@ let outputPath = path.join(
 );
 
 // Make request
+console.error(
+  `Getting URL${TTL ? '' : ' (cache off)'}: ${process.env.SCRAPER_CALENDAR_URL}`
+);
 request(
   {
     ttl: TTL,
