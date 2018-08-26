@@ -57,6 +57,36 @@ let outputDir = argv.output || path.join(__dirname, '..', 'output');
 outputDir = path.join(outputDir, 'cases');
 fs.mkdirpSync(outputDir);
 
+// Get summary data
+let summary = {};
+let summaryPath = path.join(outputDir, 'cases.csv');
+if (fs.existsSync(summaryPath)) {
+  summary = _.mapKeys(
+    _.filter(csv.parse(fs.readFileSync(summaryPath, 'utf-8'))),
+    'caseId'
+  );
+}
+const summarySave = () => {
+  fs.writeFileSync(
+    summaryPath,
+    csv.format(_.filter(_.map(summary, d => d), 'caseId'))
+  );
+};
+
+// Get actions
+let actions = {};
+let actionsPath = path.join(outputDir, 'actions.csv');
+if (fs.existsSync(actionsPath)) {
+  actions = _.mapKeys(
+    _.filter(csv.parse(fs.readFileSync(actionsPath, 'utf-8'))),
+    'id'
+  );
+}
+const actionsSave = () => {
+  //console.log(actions);
+  fs.writeFileSync(actionsPath, csv.format(_.filter(_.map(actions, d => d))));
+};
+
 // Get a case
 async function getCase(caseId) {
   let outputCaseDir = path.join(outputDir, caseId);
@@ -108,7 +138,9 @@ async function getCase(caseId) {
         );
 
         // Data parse
-        let data = {};
+        let data = {
+          caseId
+        };
 
         // Load up DOM
         const $ = cheerio.load(body.toString());
@@ -168,6 +200,7 @@ async function getCase(caseId) {
         $costs.find('tbody tr').each((i, el) => {
           let $tds = $(el).find('td');
           data.costs.push({
+            caseId,
             incurredBy: $($tds[0])
               .text()
               .trim(),
@@ -196,7 +229,7 @@ async function getCase(caseId) {
           .find('.panel-body')
           .text()
           .trim();
-        data.actions = parseActions(data.actionsRaw);
+        data.actions = parseActions(data.actionsRaw, caseId);
 
         // Download images
         let actionLinks = [];
@@ -212,6 +245,7 @@ async function getCase(caseId) {
             let id = a.match(/id=([0-9a-z-_]+)&/i)[1];
             try {
               await downloadAction({
+                caseId,
                 url: a,
                 id: id,
                 output: outputCaseActionsDir
@@ -246,6 +280,17 @@ async function getCase(caseId) {
           JSON.stringify(data, null, '  ')
         );
 
+        // Save actions
+        _.each(data.actions, (a, ai) => {
+          a.id = `${caseId}-${ai}`;
+          actions[a.id] = a;
+        });
+        actionsSave();
+
+        // Save to summary
+        summary[caseId] = _.omit(data, ['costs', 'actions']);
+        summarySave();
+
         resolve(data);
       }
     );
@@ -253,7 +298,7 @@ async function getCase(caseId) {
 }
 
 // Download an action
-async function downloadAction({ url, id, output }) {
+async function downloadAction({ caseId, url, id, output }) {
   return new Promise((resolve, reject) => {
     request(
       {
@@ -274,7 +319,7 @@ async function downloadAction({ url, id, output }) {
           return reject(error);
         }
 
-        fs.writeFileSync(path.join(output, `${id}.pdf`), body);
+        fs.writeFileSync(path.join(output, `${caseId}_${id}.pdf`), body);
         resolve();
       }
     );
@@ -282,7 +327,7 @@ async function downloadAction({ url, id, output }) {
 }
 
 // Parse actions
-function parseActions(text) {
+function parseActions(text, caseId) {
   let actions = [];
   let actionReg = /(^|[0-9]+\/[0-9]+\/[0-9]+)(.*)([0-9]+\/[0-9]+\/[0-9]+|$)/gim;
   let parts = text.match(actionReg);
@@ -305,6 +350,7 @@ function parseActions(text) {
       if (beginning) {
         actions.push(action);
         action = {
+          caseId,
           date: moment(beginning[1], 'MM/DD/YYYY'),
           type: beginning[2].trim()
         };
@@ -321,7 +367,7 @@ function parseActions(text) {
     });
   }
 
-  return actions;
+  return _.filter(actions, a => a.date);
 }
 
 if (argv.caseId) {
