@@ -207,9 +207,12 @@ async function getCase(caseId) {
             account: $($tds[1])
               .text()
               .trim(),
-            date: $($tds[2])
-              .text()
-              .trim(),
+            date: moment(
+              $($tds[2])
+                .text()
+                .trim(),
+              'MM/DD/YYYY'
+            ).format('YYYY-MM-DD'),
             amount: $($tds[3])
               .text()
               .trim()
@@ -351,7 +354,7 @@ function parseActions(text, caseId) {
         actions.push(action);
         action = {
           caseId,
-          date: moment(beginning[1], 'MM/DD/YYYY'),
+          date: moment(beginning[1], 'MM/DD/YYYY').format('YYYY-MM-DD'),
           type: beginning[2].trim()
         };
       }
