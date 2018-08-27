@@ -36,6 +36,11 @@ const argv = require('yargs')
     description:
       'The county identifier number, should be two digits, defaults to the SCRAPER_CASES_COUNTY_NUMBER environment variable.',
     default: process.env.SCRAPER_CASES_COUNTY_NUMBER
+  })
+  .option('new', {
+    description:
+      'Won\'t scrape cases that already have been scraped; specifically checks for the raw HTML file in the case directory.',
+    default: false
   }).argv;
 
 // Request cache
@@ -91,10 +96,19 @@ const actionsSave = () => {
 async function getCase(caseId) {
   let outputCaseDir = path.join(outputDir, caseId);
   let outputCaseActionsDir = path.join(outputDir, caseId, 'actions');
+  let rawOutputHTML = path.join(outputCaseDir, `case.${caseId}.html`);
   fs.mkdirpSync(outputCaseDir);
   fs.mkdirpSync(outputCaseActionsDir);
 
   return new Promise(async (resolve, reject) => {
+    // Check if new
+    if (argv.new && fs.existsSync(rawOutputHTML)) {
+      console.error(
+        `The --new option is used and the ${caseId} case HTML output exists.`
+      );
+      return resolve();
+    }
+
     console.error(`Getting case${TTL ? '' : ' (cache off)'}: ${caseId}`);
     request(
       {
@@ -132,10 +146,7 @@ async function getCase(caseId) {
         }
 
         // Save a copy of the raw HTML
-        fs.writeFileSync(
-          path.join(outputCaseDir, `case.${caseId}.html`),
-          body.toString()
-        );
+        fs.writeFileSync(rawOutputHTML, body.toString());
 
         // Data parse
         let data = {
