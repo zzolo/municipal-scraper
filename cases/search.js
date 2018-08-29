@@ -14,7 +14,15 @@ require('dotenv').load();
 const argv = require('yargs')
   .usage('\nUsage: node cases/search.js')
   .option('case-id', {
-    description: 'Case ID to search for.'
+    description: 'Case ID to search for.  Do not use with the --csv option.'
+  })
+  .option('csv', {
+    description:
+      'Path to the CSV file for input.  Do not use with the --case-id option.  See the --csv-column for column option.'
+  })
+  .option('csv-column', {
+    description: 'Column to use wih the --csv option.',
+    default: 'case_id'
   })
   .option('no-cache', {
     description: 'Turn off the cache.'
@@ -91,6 +99,47 @@ const actionsSave = () => {
   //console.log(actions);
   fs.writeFileSync(actionsPath, csv.format(_.filter(_.map(actions, d => d))));
 };
+
+// Check for which input
+if (argv.caseId) {
+  getCase(argv.caseId);
+}
+else if (argv.csv) {
+  getCases(argv.csv, argv.csvColumn);
+}
+else {
+  console.error('The --case-id or --csv options must be used.');
+  process.exit(1);
+}
+
+// Get multiple cases
+async function getCases(csvPath, csvColumn) {
+  // Get csv file
+  if (!fs.existsSync(csvPath)) {
+    console.error(`Unable to find CSV at "${csvPath}"`);
+    process.exit(1);
+  }
+  let inputCsv = csv.parse(fs.readFileSync(csvPath, 'utf-8'));
+
+  // Check CSV
+  if (!inputCsv.length) {
+    console.error(`Unable to find any rows in the CSV at "${csvPath}"`);
+    process.exit(1);
+  }
+  if (!inputCsv[0][csvColumn]) {
+    console.error(
+      `Unable to find the "${csvColumn}" in the CSV at "${csvPath}"`
+    );
+    process.exit(1);
+  }
+
+  // Go through CSV
+  for (let rowId in inputCsv) {
+    if (inputCsv[rowId][csvColumn]) {
+      await getCase(inputCsv[rowId][csvColumn]);
+    }
+  }
+}
 
 // Get a case
 async function getCase(caseId) {
@@ -382,11 +431,4 @@ function parseActions(text, caseId) {
   }
 
   return _.filter(actions, a => a.date);
-}
-
-if (argv.caseId) {
-  getCase(argv.caseId);
-}
-else {
-  console.error('No Case ID provided.');
 }

@@ -1,6 +1,7 @@
 .logs
 .cache
 output
+test/test.csv
 
 # Common
 .vscode
