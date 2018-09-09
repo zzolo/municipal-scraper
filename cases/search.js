@@ -4,11 +4,15 @@
 const fs = require('fs-extra');
 const path = require('path');
 const _ = require('lodash');
-const request = require('cached-request')(require('request'));
 const cheerio = require('cheerio');
 const csv = require('d3-dsv').dsvFormat(',');
 const moment = require('moment-timezone');
 require('dotenv').load();
+
+// Put together throttled and cached request
+const throttledRequest = require('throttled-request')(require('request'));
+throttledRequest.configure({ requests: 1, milliseconds: 3000 });
+const request = require('cached-request')(throttledRequest);
 
 // Command line options
 const argv = require('yargs')
@@ -101,16 +105,19 @@ const actionsSave = () => {
 };
 
 // Check for which input
-if (argv.caseId) {
-  getCase(argv.caseId);
+async function main() {
+  if (argv.caseId) {
+    await getCase(argv.caseId);
+  }
+  else if (argv.csv) {
+    await getCases(argv.csv, argv.csvColumn);
+  }
+  else {
+    console.error('The --case-id or --csv options must be used.');
+    process.exit(1);
+  }
 }
-else if (argv.csv) {
-  getCases(argv.csv, argv.csvColumn);
-}
-else {
-  console.error('The --case-id or --csv options must be used.');
-  process.exit(1);
-}
+main();
 
 // Get multiple cases
 async function getCases(csvPath, csvColumn) {
@@ -134,9 +141,17 @@ async function getCases(csvPath, csvColumn) {
   }
 
   // Go through CSV
-  for (let rowId in inputCsv) {
-    if (inputCsv[rowId][csvColumn]) {
-      await getCase(inputCsv[rowId][csvColumn]);
+  for (let row of inputCsv) {
+    if (row && row[csvColumn]) {
+      try {
+        await getCase(row[csvColumn]);
+      }
+      catch (e) {
+        if (argv.trace || process.env.DEBUG) {
+          console.error(e);
+        }
+        process.exit(1);
+      }
     }
   }
 }
@@ -158,7 +173,7 @@ async function getCase(caseId) {
       return resolve();
     }
 
-    console.error(`Getting case${TTL ? '' : ' (cache off)'}: ${caseId}`);
+    console.error(`\n\nGetting case${TTL ? '' : ' (cache off)'}: ${caseId}`);
     request(
       {
         ttl: TTL,
@@ -206,10 +221,13 @@ async function getCase(caseId) {
         const $ = cheerio.load(body.toString());
 
         // Doesn't come back with an error header, so we need to check for it
-        let $error = $('.alert-danger');
+        let $error = $('.alert-danger,.alert-block');
         if ($error.length && $error.text()) {
           console.error(
-            `Error from search\n===\n${$error.text().trim()}\n====\n`
+            `Error from search\n===\n${$error
+              .text()
+              .replace(/(\s|\t)+/, ' ')
+              .trim()}\n====\n`
           );
           console.error(
             `Error searching for ${caseId}, use the --no-cache option to force a re-fetch.`
@@ -303,7 +321,6 @@ async function getCase(caseId) {
             actionLinks.push($(el).attr('href'));
           });
         if (actionLinks && actionLinks.length) {
-          console.error(`Downloading images for ${caseId}`);
           for (let a of actionLinks) {
             let id = a.match(/id=([0-9a-z-_]+)&/i)[1];
             try {
@@ -316,6 +333,7 @@ async function getCase(caseId) {
               console.error(`Downloaded image ${id} for case ${caseId}`);
             }
             catch (e) {
+              console.error(e);
               console.error(
                 `There was an error downloading image ${id} for case ${caseId}`
               );
@@ -380,6 +398,15 @@ async function downloadAction({ caseId, url, id, output }) {
       (error, response, body) => {
         if (error) {
           return reject(error);
+        }
+        else if (response.statusCode >= 300) {
+          return reject(
+            new Error(
+              `Error of status code "${
+                response.statusCode
+              }" getting file ${url}`
+            )
+          );
         }
 
         fs.writeFileSync(path.join(output, `${caseId}_${id}.pdf`), body);

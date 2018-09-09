@@ -1,7 +1,7 @@
 .logs
 .cache
 output
-test/test.csv
+test/*.csv
 
 # Common
 .vscode
