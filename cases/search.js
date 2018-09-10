@@ -380,11 +380,33 @@ async function getCase(caseId) {
 
 // Download an action
 async function downloadAction({ caseId, url, id, output }) {
+  // There's an odd behavior where if a download is stopped in the middle,
+  // the cached-request handling just fails without oddly
+  const actionsDownloadsPath = path.join(cacheDir, 'action-downloads.json');
+  let actionsDownloads = {};
+  if (fs.existsSync(actionsDownloadsPath)) {
+    actionsDownloads = JSON.parse(
+      fs.readFileSync(actionsDownloadsPath, 'utf-8')
+    );
+  }
+
+  // If currently downloading, then force re-download
+  let actionTTL = TTL;
+  if (actionsDownloads[`${caseId}-${id}`]) {
+    console.error(`Action ${id} did not finish downloading, re-downloading.`);
+    actionTTL = 0;
+  }
+
+  // Mark as download
+  actionsDownloads[`${caseId}-${id}`] = true;
+  fs.writeFileSync(actionsDownloadsPath, JSON.stringify(actionsDownloads));
+
+  // Download
   return new Promise((resolve, reject) => {
     request(
       {
         url,
-        ttl: TTL,
+        ttl: actionTTL,
         timeout: TIMEOUT,
         headers: {
           'Cache-Control': 'no-cache'
@@ -409,6 +431,14 @@ async function downloadAction({ caseId, url, id, output }) {
           );
         }
 
+        // Update tracking
+        actionsDownloads[`${caseId}-${id}`] = false;
+        fs.writeFileSync(
+          actionsDownloadsPath,
+          JSON.stringify(actionsDownloads)
+        );
+
+        // Actual download
         fs.writeFileSync(path.join(output, `${caseId}_${id}.pdf`), body);
         resolve();
       }
