@@ -33,7 +33,7 @@ const argv = require('yargs')
   })
   .option('cache', {
     description: 'Time to cache results in seconds',
-    default: 60 * 60
+    default: 60 * 60 * 24 * 7
   })
   .option('output', {
     description: 'The directory to output results to.',
@@ -164,6 +164,26 @@ async function getCase(caseId) {
   fs.mkdirpSync(outputCaseDir);
   fs.mkdirpSync(outputCaseActionsDir);
 
+  // There's an odd behavior where if a download is stopped in the middle,
+  // the cached-request handling just fails oddly
+  const caseDownloadsPath = path.join(cacheDir, 'case-downloads.json');
+  let caseDownloads = {};
+  if (fs.existsSync(caseDownloadsPath)) {
+    caseDownloads = JSON.parse(fs.readFileSync(caseDownloadsPath, 'utf-8'));
+  }
+
+  // If currently downloading, then force re-download
+  let caseTTL = TTL;
+  if (caseDownloads[caseId]) {
+    console.error(`Case ${caseId} did not finish downloading, re-downloading.`);
+    caseTTL = 0;
+  }
+
+  // Mark as download
+  caseDownloads[caseId] = true;
+  fs.writeFileSync(caseDownloadsPath, JSON.stringify(caseDownloads));
+
+  // Star promise
   return new Promise(async (resolve, reject) => {
     // Check if new
     if (argv.new && fs.existsSync(rawOutputHTML)) {
@@ -173,10 +193,10 @@ async function getCase(caseId) {
       return resolve();
     }
 
-    console.error(`\n\nGetting case${TTL ? '' : ' (cache off)'}: ${caseId}`);
+    console.error(`\nGetting case${TTL ? '' : ' (cache off)'}: ${caseId}`);
     request(
       {
-        ttl: TTL,
+        ttl: caseTTL,
         method: 'POST',
         timeout: TIMEOUT,
         url: process.env.SCRAPER_CASES_URL,
@@ -312,6 +332,10 @@ async function getCase(caseId) {
           .trim();
         data.actions = parseActions(data.actionsRaw, caseId);
 
+        // Update tracking
+        caseDownloads[caseId] = false;
+        fs.writeFileSync(caseDownloadsPath, JSON.stringify(caseDownloads));
+
         // Download images
         let actionLinks = [];
         $('#register_of_actions')
@@ -381,7 +405,7 @@ async function getCase(caseId) {
 // Download an action
 async function downloadAction({ caseId, url, id, output }) {
   // There's an odd behavior where if a download is stopped in the middle,
-  // the cached-request handling just fails without oddly
+  // the cached-request handling just fails oddly
   const actionsDownloadsPath = path.join(cacheDir, 'action-downloads.json');
   let actionsDownloads = {};
   if (fs.existsSync(actionsDownloadsPath)) {
