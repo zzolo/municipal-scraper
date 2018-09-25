@@ -33,7 +33,7 @@ const argv = require('yargs')
   })
   .option('cache', {
     description: 'Time to cache results in seconds',
-    default: 60 * 60 * 24 * 7
+    default: 60 * 60 * 24
   })
   .option('output', {
     description: 'The directory to output results to.',
