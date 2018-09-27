@@ -18,6 +18,8 @@ Set the following environment variables. These can be managed in a [`.env`](http
 - `SCRAPER_CASES_PASSWORD` (required)
 - `SCRAPER_CASES_COURT_TYPE`
 - `SCRAPER_CASES_COUNTY_NUMBER`
+- `SCRAPER_NAME_URL` (required)
+- `SCRAPER_NAME_HIDDEN_TOKEN` (required)
 
 ## Usage
 
@@ -27,3 +29,6 @@ Set the following environment variables. These can be managed in a [`.env`](http
 - Scrape case(es). Outputs to `output/cases/<case-id>` in this project folder by default.
   - Basic usage `node cases/search.js --case-id="XXXXX"`
   - Help `node cases/search.js --help`
+- Scrape list of cases by name. Outputs to `output/names/<search-id>.csv` in this project folder by default.
+  - Basic usage `node names/search.js --name="Smith, John"`
+  - Help `node names/search.js --help`
