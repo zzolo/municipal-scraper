@@ -79,7 +79,7 @@ async function main() {
   outputDir = path.join(outputDir, 'calendar');
   fs.mkdirpSync(outputDir);
 
-  // Output allvcurrent
+  // Output all current
   let outputCurrentPath = path.join(outputDir, 'all-cases-recent.csv');
   let outputCurrent = [];
   if (fs.existsSync(outputCurrentPath)) {
