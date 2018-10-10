@@ -2,6 +2,7 @@
 .cache
 output
 test/*.csv
+names/sub-case-types.js
 
 # Common
 .vscode

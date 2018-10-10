@@ -18,10 +18,20 @@ const request = require('cached-request')(throttledRequest);
 const argv = require('yargs')
   .usage('\nUsage: node names/search.js')
   .option('name', {
-    description: 'Name to search for, such as "Smith, John".'
+    description: 'Optional, name to search for, such as "Smith, John".'
   })
   .option('case-type', {
-    description: 'Optional case type to limit.  For example "JV"'
+    description: 'Optional county code.  For instance 01.'
+  })
+  .option('case-type', {
+    description: 'Optional case type code to limit search.  For instance JV.'
+  })
+  .option('case-sub-type', {
+    description: 'Optional case sub type code.  This is based on the case type.'
+  })
+  .option('entity-type', {
+    description: 'Entity type to use.',
+    default: 'individual'
   })
   .option('no-cache', {
     description: 'Turn off the cache.'
@@ -58,13 +68,53 @@ fs.mkdirpSync(outputDir);
 let now = moment();
 
 // Do search
-searchName(argv);
+searchNamePages(argv);
+
+// Search multiple pages of results
+async function searchNamePages(options) {
+  options.start = options.start || 0;
+  options.save = options.save || false;
+  let morePages = true;
+  let completeData = [];
+  let totalPages;
+
+  // While we have more pages to do
+  while (morePages) {
+    console.error(
+      `\nStarting on page ${options.start / 25 + 1} of ${
+        totalPages ? totalPages : '[unknown]'
+      }+ pages`
+    );
+    let { data, nextStart, pages } = await searchName(options);
+    completeData = completeData.concat(data);
+
+    if (nextStart) {
+      options.start = nextStart;
+      morePages = true;
+      totalPages = pages;
+    }
+    else {
+      morePages = false;
+    }
+  }
+
+  // Write output
+  options.start = undefined;
+  let searchId = `${makeSearchId(options)}-all`;
+  let outputData = path.join(outputDir, `${searchId}.csv`);
+  fs.writeFileSync(outputData, csv.format(completeData));
+  console.error(`Done. Saved full output to: ${outputData}`);
+}
 
 // Search name`
 async function searchName(options) {
-  let searchId = _.kebabCase(
-    _.filter([options.name, options.caseType]).join(' ')
-  );
+  // County needs to be two digits
+  options.county = options.county
+    ? options.county.toString().padStart(2, '0')
+    : options.county;
+
+  // Create search ID
+  let searchId = makeSearchId(options);
   let outputSearchHTML = path.join(outputDir, `${searchId}.html`);
   let outputSearchCSV = path.join(outputDir, `${searchId}.csv`);
 
@@ -91,8 +141,13 @@ async function searchName(options) {
 
   // Start promise
   return new Promise(async (resolve, reject) => {
+    // If subtype, but no type
+    if (options.caseSubType && !options.caseType) {
+      reject(new Error('CAnnot use --case-sub-type without a --case-type.'));
+    }
+
     console.error(
-      `\nGetting name search${TTL ? '' : ' (cache off)'}: ${searchId}`
+      `Getting name search${TTL ? '' : ' (cache off)'}: ${searchId}`
     );
     request(
       {
@@ -109,9 +164,14 @@ async function searchName(options) {
         },
         form: {
           submit_hidden: process.env.SCRAPER_NAME_HIDDEN_TOKEN,
-          party_name: options.name,
-          case_type: options.caseType ? options.caseType : undefined,
-          indiv_entity_type: 'individual'
+          start: options.start ? options.start : undefined,
+          party_name: options.name ? options.name : undefined,
+          county_num: options.county ? options.county.toString() : undefined,
+          case_type: options.caseType ? options.caseType.toString() : undefined,
+          subtype: options.caseSubType
+            ? options.caseSubType.toString()
+            : undefined,
+          indiv_entity_type: options.entityType
         }
       },
       async (error, response, body) => {
@@ -137,9 +197,7 @@ async function searchName(options) {
         if ($error.length && $error.text()) {
           console.error($error.text());
           console.error(
-            `Error searching for "${
-              options.name
-            }", use the --no-cache option to force a re-fetch.`
+            `Error searching for "${searchId}", use the --no-cache option to force a re-fetch.`
           );
           return resolve();
         }
@@ -154,8 +212,11 @@ async function searchName(options) {
 
             data.push({
               captureDate: now.toISOString(),
+              searchID: searchId,
               searchName: options.name,
+              searchCounty: options.county,
               searchCaseType: options.caseType,
+              searchCaseSubType: options.caseSubType,
               name: nameCell
                 .replace(/[\s\t\r\n]+/, ' ')
                 .replace(/[\s\t\r\n]+/gm, ' ')
@@ -190,16 +251,60 @@ async function searchName(options) {
           }
         );
 
+        // Determine if there is another page
+        let nextStart = false;
+        let pages = 0;
+        if ($('#page_links').length) {
+          let starts = [];
+          $('#page_links li input[name="start"]').each((i, el) => {
+            starts.push(parseInt($(el).val(), 10));
+          });
+
+          starts = _.sortBy(starts);
+          pages = starts.length;
+          let currentStart = _.findIndex(
+            starts,
+            s => s === parseInt(options.start, 10)
+          );
+
+          if (currentStart === -1 || currentStart >= starts.length - 1) {
+            nextStart = false;
+          }
+          else {
+            nextStart = starts[currentStart + 1];
+          }
+        }
+
         // Update tracking
         nameDownloads[searchId] = false;
         fs.writeFileSync(nameDownloadsPath, JSON.stringify(nameDownloads));
 
         // Output just this pull
-        fs.writeFileSync(outputSearchCSV, csv.format(data));
-        console.error(`Done. Saved this run to: ${outputSearchCSV}`);
+        if (options.save) {
+          fs.writeFileSync(outputSearchCSV, csv.format(data));
+          console.error(`Done. Saved this run to: ${outputSearchCSV}`);
+        }
 
-        resolve();
+        resolve({
+          data,
+          nextStart,
+          pages
+        });
       }
     );
   });
+}
+
+// Make search ID based on options
+function makeSearchId(options) {
+  return _.kebabCase(
+    _.filter([
+      options.name,
+      options.county,
+      options.caseType,
+      options.caseSubType,
+      options.entityType,
+      options.start === 0 ? '0' : options.start
+    ]).join(' ')
+  );
 }
