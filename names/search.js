@@ -29,6 +29,10 @@ const argv = require('yargs')
   .option('case-sub-type', {
     description: 'Optional case sub type code.  This is based on the case type.'
   })
+  .option('year', {
+    description:
+      'Optional year.  This should be the last two digits of the year, such as 01 or 98.'
+  })
   .option('entity-type', {
     description: 'Entity type to use.',
     default: 'individual'
@@ -62,10 +66,18 @@ if (!process.env.SCRAPER_CASES_URL) {
 // Output
 let outputDir = argv.output || path.join(__dirname, '..', 'output');
 outputDir = path.join(outputDir, 'names');
+let outputHTMLDir = path.join(outputDir, 'html');
 fs.mkdirpSync(outputDir);
+fs.mkdirpSync(outputHTMLDir);
 
 // Now
 let now = moment();
+
+// Formatting
+argv.county = argv.county
+  ? argv.county.toString().padStart(2, '0')
+  : argv.county;
+argv.year = argv.year ? argv.year.toString().padStart(2, '0') : argv.year;
 
 // Do search
 searchNamePages(argv);
@@ -76,22 +88,16 @@ async function searchNamePages(options) {
   options.save = options.save || false;
   let morePages = true;
   let completeData = [];
-  let totalPages;
 
   // While we have more pages to do
   while (morePages) {
-    console.error(
-      `\nStarting on page ${options.start / 25 + 1} of ${
-        totalPages ? totalPages : '[unknown]'
-      }+ pages`
-    );
-    let { data, nextStart, pages } = await searchName(options);
+    let { data, nextStart, pageDescription } = await searchName(options);
     completeData = completeData.concat(data);
+    console.error(`Finished: ${pageDescription}`);
 
     if (nextStart) {
       options.start = nextStart;
       morePages = true;
-      totalPages = pages;
     }
     else {
       morePages = false;
@@ -108,14 +114,9 @@ async function searchNamePages(options) {
 
 // Search name`
 async function searchName(options) {
-  // County needs to be two digits
-  options.county = options.county
-    ? options.county.toString().padStart(2, '0')
-    : options.county;
-
   // Create search ID
   let searchId = makeSearchId(options);
-  let outputSearchHTML = path.join(outputDir, `${searchId}.html`);
+  let outputSearchHTML = path.join(outputHTMLDir, `${searchId}.html`);
   let outputSearchCSV = path.join(outputDir, `${searchId}.csv`);
 
   // There's an odd behavior where if a download is stopped in the middle,
@@ -143,11 +144,11 @@ async function searchName(options) {
   return new Promise(async (resolve, reject) => {
     // If subtype, but no type
     if (options.caseSubType && !options.caseType) {
-      reject(new Error('CAnnot use --case-sub-type without a --case-type.'));
+      reject(new Error('Cannot use --case-sub-type without a --case-type.'));
     }
 
     console.error(
-      `Getting name search${TTL ? '' : ' (cache off)'}: ${searchId}`
+      `\nGetting name search${TTL ? '' : ' (cache off)'}: ${searchId}`
     );
     request(
       {
@@ -166,6 +167,7 @@ async function searchName(options) {
           submit_hidden: process.env.SCRAPER_NAME_HIDDEN_TOKEN,
           start: options.start ? options.start : undefined,
           party_name: options.name ? options.name : undefined,
+          year: options.year ? options.year : undefined,
           county_num: options.county ? options.county.toString() : undefined,
           case_type: options.caseType ? options.caseType.toString() : undefined,
           subtype: options.caseSubType
@@ -213,8 +215,10 @@ async function searchName(options) {
             data.push({
               captureDate: now.toISOString(),
               searchID: searchId,
+              searchPageStart: options.start,
               searchName: options.name,
               searchCounty: options.county,
+              searchYear: options.year,
               searchCaseType: options.caseType,
               searchCaseSubType: options.caseSubType,
               name: nameCell
@@ -253,25 +257,33 @@ async function searchName(options) {
 
         // Determine if there is another page
         let nextStart = false;
-        let pages = 0;
+        let pageDescription;
+
         if ($('#page_links').length) {
+          // Put together list of starts from links
           let starts = [];
           $('#page_links li input[name="start"]').each((i, el) => {
             starts.push(parseInt($(el).val(), 10));
           });
 
+          // Find where we are
           starts = _.sortBy(starts);
-          pages = starts.length;
           let currentStart = _.findIndex(
             starts,
             s => s === parseInt(options.start, 10)
           );
 
+          // Determine next one
           if (currentStart === -1 || currentStart >= starts.length - 1) {
             nextStart = false;
           }
           else {
             nextStart = starts[currentStart + 1];
+          }
+
+          // Try to get descriptive page
+          if ($('.col-sm-12.text-right strong').length) {
+            pageDescription = $('.col-sm-12.text-right strong').text();
           }
         }
 
@@ -288,7 +300,7 @@ async function searchName(options) {
         resolve({
           data,
           nextStart,
-          pages
+          pageDescription
         });
       }
     );
@@ -301,6 +313,7 @@ function makeSearchId(options) {
     _.filter([
       options.name,
       options.county,
+      options.year,
       options.caseType,
       options.caseSubType,
       options.entityType,
