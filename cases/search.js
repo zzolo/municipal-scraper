@@ -352,6 +352,7 @@ async function getCase(caseId) {
                 caseId,
                 url: a,
                 id: id,
+                actions: data.actions,
                 output: outputCaseActionsDir
               });
               console.error(`Downloaded image ${id} for case ${caseId}`);
@@ -403,7 +404,7 @@ async function getCase(caseId) {
 }
 
 // Download an action
-async function downloadAction({ caseId, url, id, output }) {
+async function downloadAction({ caseId, url, id, output, actions }) {
   // There's an odd behavior where if a download is stopped in the middle,
   // the cached-request handling just fails oddly
   const actionsDownloadsPath = path.join(cacheDir, 'action-downloads.json');
@@ -424,6 +425,11 @@ async function downloadAction({ caseId, url, id, output }) {
   // Mark as download
   actionsDownloads[`${caseId}-${id}`] = true;
   fs.writeFileSync(actionsDownloadsPath, JSON.stringify(actionsDownloads));
+
+  // Get action info from action list
+  let action = _.find(actions, a => {
+    return a.caseId === caseId && a.image === id;
+  });
 
   // Download
   return new Promise((resolve, reject) => {
@@ -463,7 +469,15 @@ async function downloadAction({ caseId, url, id, output }) {
         );
 
         // Actual download
-        fs.writeFileSync(path.join(output, `${caseId}_${id}.pdf`), body);
+        fs.writeFileSync(
+          path.join(
+            output,
+            `${
+              action && action.date ? action.date : 'unknown-date-'
+            }-${caseId}_${id}.pdf`
+          ),
+          body
+        );
         resolve();
       }
     );
